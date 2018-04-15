@@ -41,28 +41,44 @@
     $Password = 'Password'
     $Results = Invoke-SQL -SQLInstance $SQLInstance -Database $Database -SQLQuery $SQLQuery -SQLStatementTimeout 60 -SQLUser $user -SQLPassword $Password
 
-
     .Notes
-     -----------------------------------------------------------------------------------------------------------------------------------------------------------------
-     Script: Invoke-SQL.ps1
-     Author: Al Degutis
-     Creation Date: 1/13/2017
-     -----------------------------------------------------------------------------------------------------------------------------------------------------------------
 
     #>
 
 
     [CmdletBinding()]
     Param(
-	    [Parameter(Mandatory=$true)][string]$SQLInstance,
-	    [Parameter(Mandatory=$true)][string]$DatabaseName,
-	    [Parameter(Mandatory=$true)][string]$SQLQuery, 
-        [Parameter(Mandatory=$false)]$SQLStatementTimeout = 600, # 10 minute default
-        [Parameter(Mandatory=$false)][string]$SQLUser,
-        [Parameter(Mandatory=$false)][string]$SQLPassword
+        [Parameter(Mandatory = $true)][string]$SQLInstance,
+        [Parameter(Mandatory = $true)][string]$DatabaseName,
+        [Parameter(Mandatory = $true)][string]$SQLQuery, 
+        [Parameter(Mandatory = $false)]$SQLStatementTimeout = 600, # 10 minute default
+        [Parameter(Mandatory = $false)][string]$SQLUser,
+        [Parameter(Mandatory = $false)][string]$SQLPassword
     )
+    # try using .NET Class for the SQL Connection
+    $SqlConnection = New-Object System.Data.SqlClient.SqlConnection
+    if ($SqlConnection) {
+        if ($SQLUser -and $SQLPassword) {
+            $SqlConnection.ConnectionString = "Server=$SQLInstance;Database=$DatabaseName;Integrated Security=False;User ID='$SQLUser';Password='$SQLPassword';"
+        } else {
+            $SqlConnection.ConnectionString = "Server=$SQLInstance;Database=$DatabaseName;Integrated Security=True;"
+        }
 
-    if (Get-Module -ListAvailable -Name SQLPS) {
+        try {
+            $SqlCmd = New-Object System.Data.SqlClient.SqlCommand
+            $SqlCmd.CommandTimeout = $SQLStatementTimeout
+            $SqlCmd.CommandText = $SQLQuery 
+            $SqlCmd.Connection = $SqlConnection
+            $SqlAdapter = New-Object System.Data.SqlClient.SqlDataAdapter
+            $SqlAdapter.SelectCommand = $SqlCmd
+            $DataSet = New-Object System.Data.DataSet
+            $SqlAdapter.Fill($DataSet) | Out-Null
+            $SqlConnection.Close()
+            $Results = $DataSet.Tables[0]
+        } Catch {
+            $Error[0] | Format-List -force
+        }
+    } elseif (Get-Module -ListAvailable -Name SQLPS) {
         if (!Get-Module -Name SQLPS ) {
             Import-Module SQLPS
         }
@@ -72,7 +88,7 @@
             Invoke-Sqlcmd -ServerInstance $SQLInstance -Database $DatabaseName -Query $SQLQuery -QueryTimeout $SQLStatementTimeout
         }
     } else {
-        # Module does not exist. Using SMO intead
+        # SQLPS Module does not exist. Using SMO intead
 
         $SMO = [System.Reflection.Assembly]::LoadWithPartialName('Microsoft.SqlServer.SMO') 
         Add-Type -Path $SMO.Location
@@ -90,15 +106,15 @@
         }
         $Instance = New-Object Microsoft.SqlServer.Management.Smo.Server($ConnectionSettings)
         $instance.ConnectionContext.StatementTimeout = $SQLStatementTimeout
-        $Database =  $Instance.Databases.Item($DatabaseName);  
+        $Database = $Instance.Databases.Item($DatabaseName);  
         try {
             $SQLResult = $Database.ExecuteWithResults($SQLQuery);
             $Results = $SQLResult.Tables[0];
         } catch {
-            $Error[0] | fl -force
+            $Error[0] | Format-List -force
         }
     }
-    $Results | select *
+    Write-Output $Results
 
 } # End Function Invoke-SQL
 
